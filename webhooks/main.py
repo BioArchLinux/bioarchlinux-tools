@@ -12,7 +12,7 @@ from agithub import GitHub
 
 import lilac2.packages
 
-from . import issue
+#from . import issue
 from . import config
 from . import git
 
@@ -62,14 +62,14 @@ class IssueHandler:
       asyncio.ensure_future(on_push())
       return
 
-    if event_type != 'issues':
-      return
+#    if event_type != 'issues':
+#      return
 
     if data['action'] not in ['opened', 'edited']:
       return
 
-    asyncio.ensure_future(issue.process_issue(
-      self.gh, data['issue'], data['action'] == 'edited'))
+ #   asyncio.ensure_future(issue.process_issue(
+ #     self.gh, data['issue'], data['action'] == 'edited'))
 
 async def on_push() -> None:
   await git.pull_repo(config.REPODIR, config.REPO_NAME)
@@ -82,9 +82,9 @@ def update_pkgname_map_sync():
   with open(config.REPODIR / 'pkgname_map.json', 'w') as f:
     json.dump(m, f)
 
-def setup_app(app, secret, token):
-  handler = IssueHandler(secret, token)
-  app.router.add_post('/lilac/issue', handler.post)
+#def setup_app(app, secret, token):
+#  handler = IssueHandler(secret, token)
+#  app.router.add_post('/lilac/issue', handler.post)
 
 def main():
   import argparse
@@ -106,7 +106,7 @@ def main():
   enable_pretty_logging(args.loglevel.upper())
 
   app = web.Application()
-  setup_app(app, os.environ['SECRET'], os.environ['GITHUB_TOKEN'])
+#  setup_app(app, os.environ['SECRET'], os.environ['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'])
 
   web.run_app(app, host=args.ip, port=args.port)
 
