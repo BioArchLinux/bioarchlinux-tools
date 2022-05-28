@@ -10,8 +10,8 @@ from typing import Set, List, Dict, Tuple
 
 import archpkg
 
-repo_path: Path = Path('/home/bio/Repo')
-gitrepo_path: Path = Path('/home/bio/Packages/BioArchLinux').expanduser()
+repo_path: Path = Path('/usr/share/lilac/Repo')
+gitrepo_path: Path = Path('/usr/share/lilac/Packages/BioArchLinux').expanduser()
 max_keep: int = 1
 DRY_RUN: bool = False
 

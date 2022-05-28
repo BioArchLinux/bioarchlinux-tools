@@ -11,7 +11,7 @@ import sys
 import time
 
 # repodir = pathlib.Path('/ldata/src/archgitrepo/archlinuxcn').expanduser()
-repodir = pathlib.Path('/home/bio/Packages/BioArchLinux').expanduser()
+repodir = pathlib.Path('/usr/share/lilac/Packages/BioArchLinux').expanduser()
 
 DRY_RUN = True
 

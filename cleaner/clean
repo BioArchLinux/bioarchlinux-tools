@@ -1,5 +1,5 @@
 #!/bin/bash
-rm -rf /home/bio/Packages/BioArchLinux/*/src
-python /home/bio/Packages/BioArchLinux_CLEANER/lilac-cleaner -f
-python /home/bio/Packages/BioArchLinux_CLEANER/repocleaner
-chown -R bio:pkg /home/bio/Packages/BioArchLinux/*
+rm -rf /usr/share/lilac/Packages/BioArchLinux/*/src
+python /usr/share/lilac/Tools/cleaner/lilac-cleaner -f
+python /usr/share/lilac/Tools/cleaner/repocleaner
+chown -R bio:pkg /usr/share/lilac/Packages/BioArchLinux/*
