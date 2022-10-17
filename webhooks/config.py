@@ -8,7 +8,7 @@ ADMIN_GH = 'starsareintherose'
 
 REPO_URL = f'git@github.com:{REPO_NAME}.git'
 MYMAIL = 'lilac@bioarchlinux.org'
-REPODIR = Path('/usr/share/archgitrepo-webhook/bioarchlinux').expanduser()
+REPODIR = Path('/home/bio/Packages/BioArchLinux').expanduser()
 
 def gen_log_comment(pkgs: list[str]) -> str:
   ss = ['''\
