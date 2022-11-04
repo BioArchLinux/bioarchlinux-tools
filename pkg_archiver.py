@@ -79,6 +79,12 @@ def archive_pkg_pkgbuild(bioconductor_version=3.15, _pkgname="_pkgname"):
     changed = False
     flag = False
     for i in range(len(lines)):
+
+        if lines[i].startswith("url=") and '//bioconductor.org' in lines[i]:
+            lines[i] = lines[i].replace(
+                "packages/", f"packages/{bioconductor_version}/")
+            changed = True
+
         if lines[i].startswith("source="):
             flag = True
         if flag:
