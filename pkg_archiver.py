@@ -4,8 +4,6 @@
 Update the PKGBUILD and lilac.yaml of archived pkgs in `pkgname.txt`
 '''
 import os
-import fileinput
-import re
 import yaml
 import argparse
 
@@ -35,12 +33,16 @@ def archive_pkg_by_file_list(file, bioarch_path="BioArchLinux", biconductor_vers
 
 
 def bump_pkgrel(step=1):
-    with fileinput.input(r"PKGBUILD", inplace=True) as f:
-        for line in f:
+    with open("PKGBUILD", "r") as f:
+        lines = f.readlines()
+        for i in range(len(lines)):
+            line = lines[i]
             if line.startswith("pkgrel="):
                 new_pkgrel = int(line.split("=")[1])+step
-                line = re.sub(
-                    r'pkgrel=\d+', f'pkgrel={new_pkgrel}', line)
+                lines[i] = f'pkgrel={new_pkgrel}\n'
+                break
+    with open("PKGBUILD", "w") as f:
+        f.writelines(lines)
 
 
 def archive_pkg_yaml(bioconductor_version=3.15, yaml_file="lilac.yaml"):
