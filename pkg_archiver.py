@@ -27,9 +27,10 @@ def archive_pkg_by_file_list(file, bioarch_path="BioArchLinux", biconductor_vers
                 pkgname = 'r-'+pkgname.lower()
 
             os.chdir(f"{bioarch_path}/{pkgname}")
-            bump_pkgrel(step)
             archive_pkg_yaml(biconductor_version)
-            archive_pkg_pkgbuild(biconductor_version)
+            changed = archive_pkg_pkgbuild(biconductor_version)
+            if changed:
+                bump_pkgrel(step)
             os.chdir(current_dir)
 
 
@@ -40,17 +41,14 @@ def bump_pkgrel(step=1):
                 new_pkgrel = int(line.split("=")[1])+step
                 line = re.sub(
                     r'pkgrel=\d+', f'pkgrel={new_pkgrel}', line)
-                break
-            print(line.rstrip())
 
 
 def archive_pkg_yaml(bioconductor_version=3.15, yaml_file="lilac.yaml"):
-  '''
-  archive pkg in CRAN and bioconductor (the latest bioconductor_version that contains the pkg  needed)
-  '''
+    '''
+    archive pkg in CRAN and bioconductor (the latest bioconductor_version that contains the pkg  needed)
+    '''
     with open(yaml_file, "r") as f:
         docs = yaml.load(f, Loader=yaml.FullLoader)
-        print(docs)
     url_idx = -1
     for i in range(len(docs['update_on'])):
         if "url" in docs['update_on'][i].keys():
@@ -78,36 +76,46 @@ def archive_pkg_pkgbuild(bioconductor_version=3.15, _pkgname="_pkgname"):
     with open("PKGBUILD", "r") as f:
         lines = f.readlines()
 
+    changed = False
     flag = False
     for i in range(len(lines)):
         if lines[i].startswith("source="):
             flag = True
         if flag:
+            new_line = lines[i]
             if 'cran.r-project.org' in lines[i] and "src/contrib/Archive" not in lines[i]:
                 # https://cran.r-project.org/src/contrib/${_pkgname}_${pkgver}.tar.gz
                 # to
                 # https://cran.r-project.org/src/contrib/Archive/${_pkgname}/${_pkgname}_${pkgver}.tar.gz
-                lines[i] = lines[i].replace(
+                new_line = lines[i].replace(
                     "src/contrib", r"src/contrib/Archive/${" + _pkgname + '}')
             elif '//bioconductor.org' in lines[i]:
                 # https://bioconductor.org/packages/release/bioc/src/contrib/${_pkgname}_${_pkgver}.tar.gz
                 # to
                 # https://bioconductor.org/packages/3.14/bioc/src/contrib/ABAEnrichment_1.24.0.tar.gz
-                lines[i] = lines[i].replace(
+                new_line = lines[i].replace(
                     "packages/release/bioc", f"packages/{bioconductor_version}/bioc")
+            else:
+                NotImplemented
+            if new_line != lines[i]:
+                changed = True
+                lines[i] = new_line
     with open("PKGBUILD", "w") as f:
         f.writelines(lines)
+    return changed
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--file', help='The file that contains the pkgname to be archived, one pkgname per line')
-    parser.add_argument('--bioarch_path', help='The path of BioArchLinux repo')
     parser.add_argument(
-        '--bico_ver', help='The Bioconductor version to be used in archived url, default 3.15')
+        '--bioarch_path', help='The path of BioArchLinux repo', default="BioArchLinux")
+    parser.add_argument(
+        '--bioc_ver', help="The Bioconductor version to be used in archived url", default="3.15")
     args = parser.parse_args()
+
     if args.file:
-        archive_pkg_by_file_list(args.file, args.bioarch_path, args.bico_ver)
+        archive_pkg_by_file_list(args.file, args.bioarch_path, args.bioc_ver)
     else:
         parser.print_help()
