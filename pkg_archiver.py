@@ -68,7 +68,7 @@ def archive_pkg_yaml(bioconductor_version=3.15, yaml_file="lilac.yaml"):
 
     docs['update_on'][url_idx]['url'] = archive_url
     with open(yaml_file, 'w') as f:
-        yaml.dump(docs, f)
+        yaml.dump(docs, f,sort_keys=False)
 
 
 def archive_pkg_pkgbuild(bioconductor_version=3.15, _pkgname="_pkgname"):
