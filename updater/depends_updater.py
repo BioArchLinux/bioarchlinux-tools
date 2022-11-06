@@ -250,11 +250,11 @@ class PkgInfo:
             elif line.strip().startswith("optdepends"):
                 optdepends_interval[0] = i
 
-            if depends_interval[0] > -1:
+            if depends_interval[0] > -1 and depends_interval[1] == -1:
                 if ')' in line:
                     # end depends
                     depends_interval[1] = i
-            if optdepends_interval[0] > -1:
+            if optdepends_interval[0] > -1 and optdepends_interval[1] == -1:
                 if ')' in line:
                     # end optdepends
                     depends_interval[1] = i
