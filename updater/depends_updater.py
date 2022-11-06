@@ -50,16 +50,14 @@ EXCLUDED_PKGS = {
 
 class PkgInfo:
     def __init__(self, pkgname=None, depends=None, optdepends=None,
-                 cran_meta_mirror="https://cran.r-project.org",
-                 bioc_meta_mirror="https://bioconductor.org",
+                 bioc_meta_mirror="https://bio.askk.cc",
                  bioc_versions=[],
                  bioc_min_version="3.0",):
         '''
         pkgname: name of the package, style in CRAN and Bioconductor, e.g. "Rcpp",
         depends: depends of the package, style in PKGBUILD, e.g. "r-base". Updated automatically if not provided.
         optdepends: optdepends of the package, style in PKGBUILD, e.g. "r-rmarkdown: for vignettes". Updated automatically if not provided.
-        cran_meta_mirror: remote mirror of CRAN use to download PACKAGES file, default to "https://cran.r-project.org"
-        bioc_meta_mirror: remote mirror of Bioconductor use to download PACKAGES file, default to "https://bioconductor.org"
+        bioc_meta_mirror: remote mirror of Bioconductor versions numbers, default to "https://bio.askk.cc"
         bioc_versions: list of Bioconductor versions to be supported, default to empty list. Updated automatically if not provided.
         bioc_min_version: minimum version of Bioconductor we want to support, default to "3.0".
         '''
@@ -72,7 +70,6 @@ class PkgInfo:
         self.new_optdepends = []
 
         self.bioc_versions = bioc_versions
-        self.cran_meta_mirror = cran_meta_mirror
         self.bioc_meta_mirror = bioc_meta_mirror
         self.bioc_min_version = bioc_min_version
 
@@ -81,8 +78,10 @@ class PkgInfo:
 
         if self.bioc_versions == []:
             self.set_bioc_versions()
+
+    def build_body(self, conn_cursor):
         self.parse_pkgbuild()
-        desc = self.get_desc()
+        desc = self.get_desc(conn_cursor)
         self.update_info(desc)
         self.merge_depends()
 
@@ -125,48 +124,11 @@ class PkgInfo:
         self.depends = depends
         self.optdepends = optdepends
 
-    def get_desc_by_file(self) -> Optional[str]:
-        '''
-        get new depends from CRAN or Bioconductor
-        @depreciated, replaced by get_desc
-        '''
-        pkgname = self.pkgname
-        CRAN_URL = f"{self.cran_meta_mirror}/src/contrib/PACKAGES"
-
-        # try cran first
-        r_cran = requests.get(CRAN_URL)
-        if r_cran.status_code == requests.codes.ok:
-            self.cran_descs = r_cran.text.split('\n\n')
-            for desc in self.cran_descs:
-                # do not remove '\n' here, or tofsims with match tofsimsData
-                if desc.startswith(f'Package: {pkgname}\n'):
-                    logging.debug(f"Found {pkgname} in CRAN")
-                    return desc
-        else:
-            raise RuntimeError(
-                f"Failed to get CRAN descriptions due to: {r_cran.status_code}: {r_cran.reason}")
-
-        # try bioconductor
-        for ver in self.bioc_versions:
-            if ver < version.parse(self.bioc_min_version):
-                continue
-            for p in ['bioc', 'data/annotation', 'data/experiment']:
-                url = f"{self.bioc_meta_mirror}/packages/{ver}/{p}/src/contrib/PACKAGES"
-                bioconductor_descs = requests.get(url)
-                if bioconductor_descs.status_code == requests.codes.ok:
-                    bioconductor_descs = bioconductor_descs.text.split('\n\n')
-                    for desc in bioconductor_descs:
-                        # do not remove '\n' here, or tofsims with match tofsimsData
-                        if desc.startswith(f'Package: {pkgname}\n'):
-                            logging.debug(
-                                f"Found {pkgname} in Bioconductor {ver}: {p}")
-                            return desc
-                else:
-                    logging.error(
-                        f'Failed to get Bioconductor descriptions for version: {ver}, {p}, due to: {bioconductor_descs.status_code}: {bioconductor_descs.reason}')
-                    continue
-
     def get_desc(self, conn_cursor) -> Optional[str]:
+        '''
+        Get description of the package from database
+        conn_cursor: sqlite3 cursor, e.g., `conn = sqlite3.connect('sqlite.db'); conn_cursor = conn.cursor()`
+        '''
         c = conn_cursor
         cursor = c.execute(
             "SELECT desc from pkgmeta where name = ?", (self.pkgname,))
@@ -318,7 +280,7 @@ class PkgInfo:
 
     def update_yaml(self, yaml_file='lilac.yaml'):
         '''
-        update the `repo_depends` part of pkg
+        update the `repo_depends` part of pkg, repo_depends will be sorted (systemlibs first, then r-pkgs)
         '''
         with open(yaml_file, "r") as f:
             docs = yaml.load(f, Loader=yaml.FullLoader)
@@ -336,16 +298,17 @@ class PkgInfo:
             yaml.dump(docs, f, sort_keys=False)
 
 
-def update_depends_by_file(file, bioarch_path="BioArchLinux", bioc_min_ver="3.0", cran_meta_mirror="https://cran.r-project.org",
-                           bioc_meta_mirror="https://bioconductor.org",):
+def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db", bioc_min_ver="3.0", bioc_meta_mirror='https://bio.askk.cc'):
     '''
     Update depends of packages listed in `file`, one package name per line, CRAN style(e.g. `Rcpp`) and pkgname style (`r-rcpp`) are both supported.
+
     file: file containing package names
     bioarch_path: path to BioArchLinux
-    bioc_min_ver: minimum version of Bioconductor to be supported, generally not needed to be changed
-    cran_meta_mirror: mirror of CRAN metadata, recommended to be changed to a local https mirror.
-    bioc_meta_mirror: mirror of Bioconductor metadata, recommended to be changed to a local https mirror.
+    db: path to the database to be read
+    bioc_min_ver: minimum version of Bioconductor to be supported.
+    bioc_meta_mirror: The server used to get all version numbers of BIOC
     '''
+
     current_dir = os.getcwd()
     # where the name are _pkgname (May have upper letters) or pkgname (r-xxx)
     case = "_pkgname"
@@ -355,6 +318,8 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", bioc_min_ver="3.0"
             if pkgname.startswith("r-"):
                 case = "pkgname"
                 break
+    conn = sqlite3.connect(db)
+    cursor = conn.cursor()
     with open(file, "r") as f:
         for pkgname in f:
             logging.info(f"Updating {pkgname}")
@@ -363,10 +328,12 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", bioc_min_ver="3.0"
                 pkgname = 'r-'+pkgname.lower()
             os.chdir(f"{bioarch_path}/{pkgname}")
             pkginfo = PkgInfo(bioc_min_version=bioc_min_ver,
-                              bioc_meta_mirror=bioc_meta_mirror, cran_meta_mirror=cran_meta_mirror)
+                              bioc_meta_mirror=bioc_meta_mirror)
+            pkginfo.build_body(cursor)
             pkginfo.update_pkgbuild()
             pkginfo.update_yaml()
             os.chdir(current_dir)
+    conn.close()
 
 
 if __name__ == '__main__':
@@ -389,7 +356,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.file:
-        update_depends_by_file(args.file, args.bioarch_path,
+        update_depends_by_file(args.file, args.bioarch_path, args.db,
                                args.bioc_min_ver, bioc_meta_mirror=args.bioc_meta_mirror)
     else:
         parser.print_help()
