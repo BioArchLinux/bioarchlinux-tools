@@ -136,8 +136,9 @@ class PkgInfo:
         if r_cran.status_code == requests.codes.ok:
             self.cran_descs = r_cran.text.split('\n\n')
             for desc in self.cran_descs:
-                if desc.startswith(f'Package: {pkgname}'):
-                    logging.info(f"Found {pkgname} in CRAN")
+                # do not remove '\n' here, or tofsims with match tofsimsData
+                if desc.startswith(f'Package: {pkgname}\n'):
+                    logging.debug(f"Found {pkgname} in CRAN")
                     return desc
         else:
             raise RuntimeError(
@@ -153,8 +154,9 @@ class PkgInfo:
                 if bioconductor_descs.status_code == requests.codes.ok:
                     bioconductor_descs = bioconductor_descs.text.split('\n\n')
                     for desc in bioconductor_descs:
-                        if desc.startswith(f'Package: {pkgname}'):
-                            logging.info(
+                        # do not remove '\n' here, or tofsims with match tofsimsData
+                        if desc.startswith(f'Package: {pkgname}\n'):
+                            logging.debug(
                                 f"Found {pkgname} in Bioconductor {ver}: {p}")
                             return desc
                 else:
@@ -166,12 +168,12 @@ class PkgInfo:
         '''
         obtain new depends and optdepends from `desc`, and write them to `self`
         '''
+        logging.debug(f"Updating {self.pkgname} using \n {desc}")
         config = configparser.ConfigParser()
         config.read_string('[pkg]\n'+desc)
         self.pkgver = config['pkg'].get('version')
         r_deps = []
         r_optdeps = []
-
         # depends
         dep_depends = config['pkg'].get('depends')
         if dep_depends:
@@ -220,6 +222,14 @@ class PkgInfo:
         if sorted(self.new_depends) != sorted(self.depends):
             self.depends_changed = True
 
+        # no optdepends
+        if not self.optdepends:
+            self.optdepends_changed = bool(self.new_optdepends)
+            return
+        if not self.new_optdepends:
+            self.optdepends_changed = bool(self.optdepends)
+            return
+
         # keep explanation of optdepends
         if any(map(lambda x: ':' in x, self.optdepends)):
             self.new_optdepends = [
@@ -243,7 +253,6 @@ class PkgInfo:
         '''
         if not self.depends_changed and not self.optdepends_changed:
             return
-
         with open("PKGBUILD", "r") as f:
             lines = f.readlines()
 
@@ -273,12 +282,25 @@ class PkgInfo:
                 lines[i] = ''
             lines[depends_interval[1]] = '\n'.join(
                 ['depends=(', '\n'.join(['  ' + _ for _ in self.new_depends]), ')\n'])
+
+        # new lines for new optdepends
+        if self.new_optdepends:
+            new_optdepends_line = '\n'.join(
+                ['optdepends=(', '\n'.join(
+                    ['  ' + _ for _ in self.new_optdepends]), ')\n'])
         if self.optdepends_changed:
+            # no old, but has new
+            if optdepends_interval[0] == -1:
+                # add optdepends
+                lines.insert(depends_interval[1]+1, new_optdepends_line)
+                optdepends_interval[0] = depends_interval[1]+1
+                optdepends_interval[1] = depends_interval[1]+1
+
+            # has old,
             for i in range(optdepends_interval[0], optdepends_interval[1]):
                 lines[i] = ''
             if self.new_optdepends:
-                lines[optdepends_interval[1]] = '\n'.join(
-                    ['optdepends=(', '\n'.join(['  ' + _ for _ in self.new_optdepends]), ')\n'])
+                lines[optdepends_interval[1]] = new_optdepends_line
 
         logging.info(f"Writing new PKGBUILD for {self.pkgname}")
         with open("PKGBUILD", "w") as f:
@@ -325,6 +347,7 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", bioc_min_ver="3.0"
                 break
     with open(file, "r") as f:
         for pkgname in f:
+            logging.info(f"Updating {pkgname}")
             pkgname = pkgname.strip()
             if case == '_pkgname':
                 pkgname = 'r-'+pkgname.lower()
@@ -337,6 +360,7 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", bioc_min_ver="3.0"
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(
         description='update the depends of R packages from CRAN and Bioconductor automatically',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
