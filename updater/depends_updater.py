@@ -332,9 +332,8 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", bioc_min_ver="3.0"
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        prog='depends updater for BioArchLinux',
         description='update the depends of R packages from CRAN and Bioconductor automatically',
-        epilog='Text at the bottom of help'
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
         '--file', help='The file that contains the pkgname to be archived, one pkgname per line')

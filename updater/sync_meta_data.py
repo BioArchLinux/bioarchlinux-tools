@@ -125,8 +125,8 @@ if __name__ == '__main__':
     d = Downloader()
     download_path = os.getenv('BIO_META_PATH', 'bioc')
     parser = argparse.ArgumentParser(
-        prog='R package metadata sync tool',
         description='Sync metadata of R packages from CRAN and Bioconductor to a local path',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
         '--path', help='The path to store the metadata files. '
