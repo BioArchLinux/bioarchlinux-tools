@@ -12,6 +12,7 @@ import argparse
 import os
 import yaml
 from typing import Optional
+import sqlite3
 
 EXCLUDED_PKGS = {
     "base",
@@ -124,9 +125,10 @@ class PkgInfo:
         self.depends = depends
         self.optdepends = optdepends
 
-    def get_desc(self) -> Optional[str]:
+    def get_desc_by_file(self) -> Optional[str]:
         '''
         get new depends from CRAN or Bioconductor
+        @depreciated, replaced by get_desc
         '''
         pkgname = self.pkgname
         CRAN_URL = f"{self.cran_meta_mirror}/src/contrib/PACKAGES"
@@ -163,6 +165,14 @@ class PkgInfo:
                     logging.error(
                         f'Failed to get Bioconductor descriptions for version: {ver}, {p}, due to: {bioconductor_descs.status_code}: {bioconductor_descs.reason}')
                     continue
+
+    def get_desc(self, conn_cursor) -> Optional[str]:
+        c = conn_cursor
+        cursor = c.execute(
+            "SELECT desc from pkgmeta where name = ?", (self.pkgname,))
+        descall = cursor.fetchone()
+        desc = descall[0]
+        return desc
 
     def update_info(self, desc) -> None:
         '''
@@ -366,20 +376,20 @@ if __name__ == '__main__':
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
-        '--file', help='The file that contains the pkgname to be archived, one pkgname per line')
+        '-f', '--file', help='The file that contains the pkgname to be archived, one pkgname per line')
     parser.add_argument(
-        '--bioarch_path', help='The path of BioArchLinux repo', default="BioArchLinux")
+        '-p', '--bioarch_path', help='The path of BioArchLinux repo', default="BioArchLinux")
+    parser.add_argument(
+        '-db', help="The database file used to query metadata of packages", default="/tmp/dbmanager/sqlite.db")
     parser.add_argument(
         '--bioc_min_ver', help="The minimum version of Bioconductor supported, must be greater than 3.0", default="3.0")
     parser.add_argument(
-        '--cran_meta_mirror', help="The mirror of CRAN metadata, recommended to be changed to a local https mirror. Only http(s) is supported", default="https://cran.r-project.org")
-    parser.add_argument(
-        '--bioc_meta_mirror', help="The mirror of Bioconductor metadata, recommended to be changed to a local https mirror. Only http(s) is supported", default="https://bioconductor.org")
+        '--bioc_meta_mirror', help="The server used to get all version numbers of BIOC", default="https://bio.askk.cc")
 
     args = parser.parse_args()
 
     if args.file:
-        update_depends_by_file(args.file, args.bioarch_path, args.bioc_min_ver,
-                               cran_meta_mirror=args.cran_meta_mirror, bioc_meta_mirror=args.bioc_meta_mirror)
+        update_depends_by_file(args.file, args.bioarch_path,
+                               args.bioc_min_ver, bioc_meta_mirror=args.bioc_meta_mirror)
     else:
         parser.print_help()
