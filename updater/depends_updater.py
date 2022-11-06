@@ -78,7 +78,7 @@ class PkgInfo:
         self.depends_changed = False
         self.optdepends_changed = False
 
-        if self.bioc_verions == []:
+        if self.bioc_versions == []:
             self.set_bioc_versions()
         self.parse_pkgbuild()
         desc = self.get_desc()
@@ -120,7 +120,7 @@ class PkgInfo:
                     '=')[-1].strip().strip("'").strip('"')
                 break
         depends = lilac.obtain_depends()
-        optdepends = lilac.obtain_optdepends()
+        optdepends = lilac.obtain_optdepends(parse_dict=False)
         self.depends = depends
         self.optdepends = optdepends
 
@@ -129,7 +129,7 @@ class PkgInfo:
         get new depends from CRAN or Bioconductor
         '''
         pkgname = self.pkgname
-        CRAN_URL = f"{self.cran_mirror}/src/contrib/PACKAGES"
+        CRAN_URL = f"{self.cran_meta_mirror}/src/contrib/PACKAGES"
 
         # try cran first
         r_cran = requests.get(CRAN_URL)
@@ -167,7 +167,7 @@ class PkgInfo:
         obtain new depends and optdepends from `desc`, and write them to `self`
         '''
         config = configparser.ConfigParser()
-        config.read_string('[pkg\n]'+desc)
+        config.read_string('[pkg]\n'+desc)
         self.pkgver = config['pkg'].get('version')
         r_deps = []
         r_optdeps = []
@@ -221,11 +221,16 @@ class PkgInfo:
             self.depends_changed = True
 
         # keep explanation of optdepends
-        if type(self.optdepends) == 'dict':
-            if sorted(self.new_optdepends) != sorted(self.optdepends.keys()):
+        if any(map(lambda x: ':' in x, self.optdepends)):
+            self.new_optdepends = [
+                x+': ' for x in self.new_optdepends if ':' not in x]
+            opt_dict = {pkg.strip(): desc.strip() for (pkg, desc) in
+                        (item.split(':', 1) for item in self.optdepends)}
+
+            if sorted(self.new_optdepends) != sorted(opt_dict.keys()):
                 self.optdepends_changed = True
             for i in range(len(self.new_optdepends)):
-                val = self.optdepends.get(self.new_optdepends[i])
+                val = opt_dict.get(self.optdepends[i])
                 if val:
                     self.new_optdepends[i] += ': '+val
         else:
@@ -257,7 +262,7 @@ class PkgInfo:
             if optdepends_interval[0] > -1 and optdepends_interval[1] == -1:
                 if ')' in line:
                     # end optdepends
-                    depends_interval[1] = i
+                    optdepends_interval[1] = i
         if not (depends_interval[1] < optdepends_interval[0] or optdepends_interval[1] < depends_interval[0]):
             logging.error(
                 "depends and optdepends overlap, please fix it manually")
@@ -267,12 +272,13 @@ class PkgInfo:
             for i in range(depends_interval[0], depends_interval[1]):
                 lines[i] = ''
             lines[depends_interval[1]] = '\n'.join(
-                ['depends=(', '\n'.join(['  ' + _ for _ in self.new_depends]), ')'])
+                ['depends=(', '\n'.join(['  ' + _ for _ in self.new_depends]), ')\n'])
         if self.optdepends_changed:
             for i in range(optdepends_interval[0], optdepends_interval[1]):
                 lines[i] = ''
-            lines[optdepends_interval[1]] = '\n'.join(
-                ['optdepends=(', '\n'.join(['  ' + _ for _ in self.new_optdepends]), ')'])
+            if self.new_optdepends:
+                lines[optdepends_interval[1]] = '\n'.join(
+                    ['optdepends=(', '\n'.join(['  ' + _ for _ in self.new_optdepends]), ')\n'])
 
         logging.info(f"Writing new PKGBUILD for {self.pkgname}")
         with open("PKGBUILD", "w") as f:
