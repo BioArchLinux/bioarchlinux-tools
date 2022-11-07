@@ -1,0 +1,197 @@
+#!/usr/bin/python3
+
+from __future__ import annotations
+
+import itertools
+import os
+import tempfile
+import subprocess
+import contextlib
+import logging
+import tarfile
+import re
+import shutil
+from functools import partial
+from pathlib import Path
+from typing import Optional, Tuple, Iterator, Generator
+
+import zstandard
+from cmdutils import so_depends
+
+logger = logging.getLogger(__name__)
+
+def path_suspicious(path: str) -> bool:
+  basename = os.path.basename(path)
+  return '/bin/' in path or '.so' in basename
+
+def walkdir(dir: str) -> Iterator[os.DirEntry]:
+  for entry in os.scandir(dir):
+    yield entry
+    if not entry.is_symlink() and entry.is_dir():
+      yield from walkdir(entry.path)
+
+def check_dependency(dir: str, lib_re: re.Pattern) -> Optional[Tuple[str, str]]:
+  for entry in walkdir(dir):
+    if not path_suspicious(entry.path):
+      continue
+
+    if not entry.is_file() or entry.is_symlink():
+      continue
+
+    try:
+      libs = so_depends(entry.path)
+      logger.debug('so_depends %s: %s', entry.path, libs)
+    except subprocess.CalledProcessError:
+      continue
+
+    for l in libs:
+      if lib_re.search(l):
+        return entry.path, l
+
+  return None
+
+def handle_rmtree_error(tmpdir, func, path, excinfo):
+  if isinstance(excinfo[1], PermissionError) and \
+     os.path.commonpath((path, tmpdir)) == tmpdir:
+    os.chmod(os.path.dirname(path), 0o700)
+    if os.path.isdir(path):
+      shutil.rmtree(path, onerror=partial(handle_rmtree_error, path))
+    else:
+      os.unlink(path)
+
+@contextlib.contextmanager
+def extract_package(pkg: os.PathLike) -> Generator[str, None, None]:
+  logger.info('extracting %s...', pkg)
+  d = tempfile.mkdtemp(prefix='depcheck-')
+  try:
+    subprocess.check_call(['bsdtar', 'xf', pkg, '--no-fflags', '-C', d])
+    yield d
+  finally:
+    shutil.rmtree(d, onerror=partial(handle_rmtree_error, d))
+
+@contextlib.contextmanager
+def tarfile_open_zstd_compat(name: str) -> Generator[tarfile.TarFile, None, None]:
+  if name.endswith('.zst'):
+    dctx = zstandard.ZstdDecompressor()
+    with open(name, 'rb') as f, dctx.stream_reader(f) as reader, tarfile.open(mode='r|', fileobj=reader) as tar:
+      yield tar
+  else:
+    with tarfile.open(name) as tar:
+      yield tar
+
+def check_package(pkg: Path, lib_re: re.Pattern, dep_pkgname: Optional[str]) -> Optional[Tuple[str, str]]:
+  if dep_pkgname is not None:
+    if check_package_buildinfo(pkg, dep_pkgname):
+      return None
+  return check_package_so(pkg, lib_re)
+
+def check_package_buildinfo(pkg: Path, dep_pkgname: str) -> bool:
+  # If a package links to a library that matches `lib_re` but does not have
+  # `dep_pkgname` installed during the build, that package is already broken
+  # For example, packages with files linked to libprotobuf.so should have
+  # protobuf installed during the build.
+  has_dep = False
+  buildinfo_found = False
+  with tarfile_open_zstd_compat(str(pkg)) as tar:
+    threshold = 10
+    for tarinfo in itertools.islice(tar, threshold):
+      if tarinfo.name == '.BUILDINFO':
+        f = tar.extractfile(tarinfo)
+        assert f
+        for line in f.read().decode().split('\n'):
+          if line.startswith('installed = '):
+            # pkgver, pkgrel and arch are not used
+            parts = line[len('installed = '):].rsplit('-', maxsplit=3)
+            if len(parts) != 4:
+              logger.warning('Old .BUILDINFO format - entry %s found in %s; checking anyway', line, pkg)
+              has_dep = True
+              break
+            pkgname, _, _, _ = parts
+            if pkgname == dep_pkgname:
+              has_dep = True
+              break
+        buildinfo_found = True
+        break
+  if not buildinfo_found:
+    logger.warning('Cannot find .BUILDINFO in first %d entries of %s; checking anyway', threshold, pkg)
+    has_dep = True
+  if not has_dep:
+    logger.info('%s does not depend on %s, skipping' % (pkg, dep_pkgname))
+    return True
+
+  return False
+
+def check_package_so(pkg: Path, lib_re: re.Pattern) -> Optional[Tuple[str, str]]:
+  with extract_package(pkg) as d:
+    logger.info('checking...')
+    a = check_dependency(d, lib_re)
+    if a is not None:
+      r, lib = a
+      r = os.path.relpath(r, d)
+      logger.warning('%s depends on %s: %s', pkg, lib, r)
+      return r, lib
+
+  return None
+
+def main(db: Path, lib_re: re.Pattern, dep_pkgname: Optional[str]) -> None:
+  ret = []
+  dir = db.parent
+
+  with tarfile.open(db) as tar:
+    for tarinfo in tar:
+      if tarinfo.isdir():
+        filename = files_match = None
+        name = tarinfo.name.split('/', 1)[0]
+        continue
+
+      if tarinfo.name.endswith('/depends'):
+        continue
+
+      if tarinfo.name.endswith('/desc'):
+        f = tar.extractfile(tarinfo)
+        assert f
+        data = f.read().decode()
+
+        it = iter(data.splitlines())
+        while True:
+          l = next(it)
+          if l == '%FILENAME%':
+            filename = next(it)
+            break
+
+      if tarinfo.name.endswith('/files'):
+        f = tar.extractfile(tarinfo)
+        assert f
+        data = f.read().decode()
+        it = iter(data.splitlines())
+        next(it)
+        for path in it:
+          if path_suspicious(path):
+            files_match = True
+            break
+
+      if filename and files_match:
+        r = check_package(dir / filename, lib_re, dep_pkgname)
+        if r is not None:
+          ret.append((name, *r))
+
+  for name, file, lib in ret:
+    print('%s: %s (%s)' % (name, file, lib))
+
+if __name__ == '__main__':
+  from nicelogger import enable_pretty_logging
+  enable_pretty_logging('INFO')
+
+  import argparse
+
+  parser = argparse.ArgumentParser(
+    description='find out what Arch packages need a particular library. Depends on cmdutils from winterpy.')
+  parser.add_argument('pkgdb',
+                      help='the package files database, eg. /data/repo/x86_64/archlinuxcn.files.tar.gz')
+  parser.add_argument('libname',
+                      help='the library filename regex to match')
+  parser.add_argument('--dep-pkgname',
+                      help='the package name that affected packages should depend on')
+  args = parser.parse_args()
+
+  main(Path(args.pkgdb), re.compile(args.libname), args.dep_pkgname)
