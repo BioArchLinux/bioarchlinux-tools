@@ -2,8 +2,6 @@
 '''
 Update the `depends` and `optdepends` part of an R package PKGBUILD listed in  `pkgname.txt`
 '''
-import requests
-from re import findall
 from packaging import version
 import configparser
 import logging
@@ -13,6 +11,7 @@ import os
 import yaml
 from typing import Optional
 import sqlite3
+from dbmanager import get_bioc_versions
 
 EXCLUDED_PKGS = {
     "base",
@@ -50,14 +49,14 @@ EXCLUDED_PKGS = {
 
 class PkgInfo:
     def __init__(self, pkgname=None, depends=None, optdepends=None,
-                 bioc_meta_mirror="https://bio.askk.cc",
+                 bioc_meta_mirror="https://bioconductor.org",
                  bioc_versions=[],
                  bioc_min_version="3.0",):
         '''
         pkgname: name of the package, style in CRAN and Bioconductor, e.g. "Rcpp",
         depends: depends of the package, style in PKGBUILD, e.g. "r-base". Updated automatically if not provided.
         optdepends: optdepends of the package, style in PKGBUILD, e.g. "r-rmarkdown: for vignettes". Updated automatically if not provided.
-        bioc_meta_mirror: remote mirror of Bioconductor versions numbers, default to "https://bio.askk.cc"
+        bioc_mirror: remote mirror of Bioconductor, default to "https://bioconductor.org"
         bioc_versions: list of Bioconductor versions to be supported, default to empty list. Updated automatically if not provided.
         bioc_min_version: minimum version of Bioconductor we want to support, default to "3.0".
         '''
@@ -68,6 +67,8 @@ class PkgInfo:
         self.pkgver = None
         self.new_depends = []
         self.new_optdepends = []
+        # newly introduced depends, may be missing in BioArchLinux, need to be added
+        self.added_depends = []  # named in  CRAN style
 
         self.bioc_versions = bioc_versions
         self.bioc_meta_mirror = bioc_meta_mirror
@@ -77,26 +78,13 @@ class PkgInfo:
         self.optdepends_changed = False
 
         if self.bioc_versions == []:
-            self.set_bioc_versions()
+            self.bioc_versions = get_bioc_versions(self.bioc_meta_mirror)
 
     def build_body(self, conn_cursor):
         self.parse_pkgbuild()
         desc = self.get_desc(conn_cursor)
         self.update_info(desc)
         self.merge_depends()
-
-    def set_bioc_versions(self) -> None:
-        '''
-        get all Bioconductor versions
-        '''
-        version_page = requests.get(
-            f"{self.bioc_meta_mirror}/bioc_version")
-        if version_page.status_code != requests.codes.ok:
-            raise RuntimeError(
-                f"Failed to get Bioconductor versions due to: {version_page.status_code}: {version_page.reason}")
-        z = version_page.text.split(',')
-
-        self.bioc_versions = list(map(lambda x: version.parse(x), z))
 
     def __str__(self) -> str:
         return f"""
@@ -162,6 +150,9 @@ class PkgInfo:
 
         if '' in r_deps:
             r_deps.remove('')
+        # now r_deps contains all depends in named CRAN style
+        self.added_depends = [
+            x for x in r_deps if f"r-{x.lower()}" not in self.depends]
 
         self.new_depends += [f"r-{_.lower()}" for _ in r_deps]
         self.new_depends.sort()
@@ -219,9 +210,10 @@ class PkgInfo:
             if sorted(self.new_optdepends) != sorted(self.optdepends):
                 self.optdepends_changed = True
 
-    def update_pkgbuild(self):
+    def update_pkgbuild(self) -> list[str]:
         '''
         write new depends to PKGBUILD if depends change
+        return the newly added depends which may not be in BioArchLinux Repo.
         '''
         if not self.depends_changed and not self.optdepends_changed:
             return
@@ -277,6 +269,7 @@ class PkgInfo:
         logging.info(f"Writing new PKGBUILD for {self.pkgname}")
         with open("PKGBUILD", "w") as f:
             f.writelines(lines)
+        return self.added_depends
 
     def update_yaml(self, yaml_file='lilac.yaml'):
         '''
@@ -298,7 +291,7 @@ class PkgInfo:
             yaml.dump(docs, f, sort_keys=False)
 
 
-def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db", bioc_min_ver="3.0", bioc_meta_mirror='https://bio.askk.cc'):
+def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db", bioc_min_ver="3.0", bioc_meta_mirror="https://bioconductor.org", output_file="added_depends.txt"):
     '''
     Update depends of packages listed in `file`, one package name per line, CRAN style(e.g. `Rcpp`) and pkgname style (`r-rcpp`) are both supported.
 
@@ -307,33 +300,32 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db", bi
     db: path to the database to be read
     bioc_min_ver: minimum version of Bioconductor to be supported.
     bioc_meta_mirror: The server used to get all version numbers of BIOC
+    output_file: file to write the added depends to.
     '''
-
+    bioc_versions = get_bioc_versions(bioc_meta_mirror)
     current_dir = os.getcwd()
     # where the name are _pkgname (May have upper letters) or pkgname (r-xxx)
-    case = "_pkgname"
-    with open(file, "r") as f:
-        for pkgname in f:
-            pkgname = pkgname.strip()
-            if pkgname.startswith("r-"):
-                case = "pkgname"
-                break
     conn = sqlite3.connect(db)
     cursor = conn.cursor()
+    added_deps = []
     with open(file, "r") as f:
         for pkgname in f:
-            logging.info(f"Updating {pkgname}")
             pkgname = pkgname.strip()
-            if case == '_pkgname':
-                pkgname = 'r-'+pkgname.lower()
+            if not pkgname.strip().startswith("r-"):
+                pkgname = "r-"+pkgname.lower()
+            logging.info(f"Updating {pkgname}")
             os.chdir(f"{bioarch_path}/{pkgname}")
             pkginfo = PkgInfo(bioc_min_version=bioc_min_ver,
-                              bioc_meta_mirror=bioc_meta_mirror)
+                              bioc_meta_mirror=bioc_meta_mirror, bioc_versions=bioc_versions)
             pkginfo.build_body(cursor)
             pkginfo.update_pkgbuild()
             pkginfo.update_yaml()
+            if pkginfo.added_depends:
+                added_deps += pkginfo.added_depends
             os.chdir(current_dir)
     conn.close()
+    with open(output_file, "w") as f:
+        f.write('\n'.join(set(added_deps)))
 
 
 if __name__ == '__main__':
@@ -351,12 +343,14 @@ if __name__ == '__main__':
     parser.add_argument(
         '--bioc_min_ver', help="The minimum version of Bioconductor supported, must be greater than 3.0", default="3.0")
     parser.add_argument(
-        '--bioc_meta_mirror', help="The server used to get all version numbers of BIOC", default="https://bio.askk.cc")
+        '--bioc_meta_mirror', help="The server used to get all version numbers of BIOC", default="https://bioconductor.org")
+    parser.add_argument(
+        '-o', '--output', help='The file to save newly added depends name', default="added_depends.txt")
 
     args = parser.parse_args()
 
     if args.file:
         update_depends_by_file(args.file, args.bioarch_path, args.db,
-                               args.bioc_min_ver, bioc_meta_mirror=args.bioc_meta_mirror)
+                               args.bioc_min_ver, bioc_meta_mirror=args.bioc_meta_mirror, output_file=args.output)
     else:
         parser.print_help()
