@@ -10,4 +10,5 @@ For usage, run with argument `-h`.
 - [ ] Support packages hosted in github.
 - [ ] Clean codes
 - [ ] merger `pkg_archiver` into `depends_updater`
-- [ ] merge `sync_meta_data` into `dbmanager`
+- [ ] generate PKGBUILD for missing dependencies `depends_updater`
+- [x] merge `sync_meta_data` into `dbmanager`
