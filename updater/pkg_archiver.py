@@ -6,6 +6,7 @@ Update the PKGBUILD and lilac.yaml of archived pkgs in `pkgname.txt`
 import os
 import yaml
 import argparse
+from lilac2.api import update_pkgrel
 
 
 def archive_pkg_by_file_list(file, bioarch_path="BioArchLinux", biconductor_version=3.15, step=1):
@@ -28,21 +29,8 @@ def archive_pkg_by_file_list(file, bioarch_path="BioArchLinux", biconductor_vers
             archive_pkg_yaml(biconductor_version)
             changed = archive_pkg_pkgbuild(biconductor_version)
             if changed:
-                bump_pkgrel(step)
+                update_pkgrel()
             os.chdir(current_dir)
-
-
-def bump_pkgrel(step=1):
-    with open("PKGBUILD", "r") as f:
-        lines = f.readlines()
-        for i in range(len(lines)):
-            line = lines[i]
-            if line.startswith("pkgrel="):
-                new_pkgrel = int(line.split("=")[1])+step
-                lines[i] = f'pkgrel={new_pkgrel}\n'
-                break
-    with open("PKGBUILD", "w") as f:
-        f.writelines(lines)
 
 
 def archive_pkg_yaml(bioconductor_version=3.15, yaml_file="lilac.yaml"):
@@ -68,7 +56,7 @@ def archive_pkg_yaml(bioconductor_version=3.15, yaml_file="lilac.yaml"):
 
     docs['update_on'][url_idx]['url'] = archive_url
     with open(yaml_file, 'w') as f:
-        yaml.dump(docs, f,sort_keys=False)
+        yaml.dump(docs, f, sort_keys=False)
 
 
 def archive_pkg_pkgbuild(bioconductor_version=3.15, _pkgname="_pkgname"):

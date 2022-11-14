@@ -12,6 +12,7 @@ import yaml
 from typing import Optional
 import sqlite3
 from dbmanager import get_bioc_versions
+from pkg_archiver import archive_pkg_yaml, archive_pkg_pkgbuild
 
 EXCLUDED_PKGS = {
     "base",
@@ -73,6 +74,8 @@ class PkgInfo:
         self.bioc_versions = bioc_versions
         self.bioc_meta_mirror = bioc_meta_mirror
         self.bioc_min_version = bioc_min_version
+        # for BIOC pkgs, the latest BIOC version that contains the pkg.
+        self.bioc_ver = None
 
         self.depends_changed = False
         self.optdepends_changed = False
@@ -83,8 +86,9 @@ class PkgInfo:
     def build_body(self, conn_cursor):
         self.parse_pkgbuild()
         desc = self.get_desc(conn_cursor)
-        self.update_info(desc)
-        self.merge_depends()
+        if desc:
+            self.update_info(desc)
+            self.merge_depends()
 
     def __str__(self) -> str:
         return f"""
@@ -119,15 +123,34 @@ class PkgInfo:
         '''
         c = conn_cursor
         cursor = c.execute(
-            "SELECT desc from pkgmeta where name = ?", (self.pkgname,))
+            "SELECT desc,bioc_ver from pkgmeta where name = ?", (self.pkgname,))
         descall = cursor.fetchone()
-        desc = descall[0]
-        return desc
+        if descall:
+            desc, self.bioc_ver = descall
+            self.bioc_ver = version.parse(
+                self.bioc_ver) if self.bioc_ver else None
+            return desc
+        else:
+            return None
+
+    def is_archived(self) -> bool:
+        '''
+        Check if the package is archived in CRAN or BIOC
+        '''
+        if not self.desc:  # not in database, archived in CRAN
+            return True
+        # not in the latest BIOC version, archived in BIOC
+        elif self.bioc_ver and self.bioc_ver != max(self.bioc_versions):
+            return True
+        return False
 
     def update_info(self, desc) -> None:
         '''
         obtain new depends and optdepends from `desc`, and write them to `self`
         '''
+        if not desc:
+            logging.warning(f"Description of {self.pkgname} is empty")
+            return
         logging.debug(f"Updating {self.pkgname} using \n {desc}")
         config = configparser.ConfigParser()
         config.read_string('[pkg]\n'+desc)
@@ -291,13 +314,16 @@ class PkgInfo:
             yaml.dump(docs, f, sort_keys=False)
 
 
-def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db", bioc_min_ver="3.0", bioc_meta_mirror="https://bioconductor.org", output_file="added_depends.txt"):
+def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
+                           auto_archive=False,
+                           bioc_min_ver="3.0", bioc_meta_mirror="https://bioconductor.org", output_file="added_depends.txt"):
     '''
     Update depends of packages listed in `file`, one package name per line, CRAN style(e.g. `Rcpp`) and pkgname style (`r-rcpp`) are both supported.
 
     file: file containing package names
     bioarch_path: path to BioArchLinux
     db: path to the database to be read
+    auto_archive: whether to archive the package if it is not in CRAN or the latest BIOC
     bioc_min_ver: minimum version of Bioconductor to be supported.
     bioc_meta_mirror: The server used to get all version numbers of BIOC
     output_file: file to write the added depends to.
@@ -320,6 +346,10 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db", bi
             pkginfo.build_body(cursor)
             pkginfo.update_pkgbuild()
             pkginfo.update_yaml()
+            if auto_archive and pkginfo.is_archived():
+                archive_pkg_yaml(bioconductor_version=pkginfo.bioc_ver)
+                archive_pkg_pkgbuild(bioconductor_version=pkginfo.bioc_ver)
+            lilac.update_pkgrel()
             if pkginfo.added_depends:
                 added_deps += pkginfo.added_depends
             os.chdir(current_dir)
@@ -346,11 +376,13 @@ if __name__ == '__main__':
         '--bioc_meta_mirror', help="The server used to get all version numbers of BIOC", default="https://bioconductor.org")
     parser.add_argument(
         '-o', '--output', help='The file to save newly added depends name', default="added_depends.txt")
+    parser.add_argument(
+        '-a', '--auto-archive', help='Automatically archive pkgs that are not in CRAN or the latest BIOC release', action='store_true')
 
     args = parser.parse_args()
 
     if args.file:
         update_depends_by_file(args.file, args.bioarch_path, args.db,
-                               args.bioc_min_ver, bioc_meta_mirror=args.bioc_meta_mirror, output_file=args.output)
+                               args.bioc_min_ver, bioc_meta_mirror=args.bioc_meta_mirror, output_file=args.output, auto_archive=args.auto_archive)
     else:
         parser.print_help()
