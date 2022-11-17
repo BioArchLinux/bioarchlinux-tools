@@ -383,6 +383,6 @@ if __name__ == '__main__':
 
     if args.file:
         update_depends_by_file(args.file, args.bioarch_path, args.db,
-                               args.bioc_min_ver, bioc_meta_mirror=args.bioc_meta_mirror, output_file=args.output, auto_archive=args.auto_archive)
+                               bioc_min_ver=args.bioc_min_ver, bioc_meta_mirror=args.bioc_meta_mirror, output_file=args.output, auto_archive=args.auto_archive)
     else:
         parser.print_help()
