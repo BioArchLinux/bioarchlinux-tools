@@ -70,15 +70,13 @@ def get_bioc_versions(bioc_mirror="https://bioconductor.org") -> list[str]:
     return bioc_versions
 
 
-def get_package_meta(url, mtime=None,):
+def get_package_meta(url, mtime=None, compare=False):
     '''
     get  package metadata from Bioconductor and CRAN.
     url: the url to be downloaded, e.g. https://bioconductor.org/packages/3.16/bioc/src/contrib/PACKAGES
     mtime: the last modified time of the local file. if remote is older than mtime, ignore it.
     '''
-    if not remote_is_newer(url, mtime):
-        logging.info(
-            f"Local Package List for  is newer than remote, skip.")
+    if compare and not remote_is_newer(url, mtime):
         return None
     meta = requests.get(url)
     if meta.status_code != requests.codes.ok:
@@ -120,28 +118,17 @@ def update_DB(engine, min_ver=None, first_run=False, mtime=None,
     cran_mirror: the CRAN mirror to use.
     '''
     bioc_vers = get_bioc_versions(bioc_mirror)
-    bioc_vers.sort(reverse=True)
+    bioc_vers.sort()
     if min_ver:
         min_ver = version.parse(min_ver)
     else:
         if first_run:
-            min_ver = bioc_vers[-1]
+            min_ver = bioc_vers[0]
         else:
-            min_ver = bioc_vers[1]
+            min_ver = bioc_vers[-2]
+    min_ver = max(min_ver, version.parse("1.8"))
 
     with Session(engine) as session:
-
-        # CRAN
-        url = f"{cran_mirror}/src/contrib/PACKAGES"
-        logging.info("Downloading CRAN Package List")
-        f = get_package_meta(url, mtime)
-        if f:
-            descs = f.split('\n\n')
-            pkgmetas = map(lambda x: from_str(x, None, None), descs)
-
-            # insert or skip
-            for pkgmeta in pkgmetas:
-                add_or_skip(session, PkgMeta, pkgmeta)
 
         # BIOC
         for ver in bioc_vers:
@@ -160,7 +147,18 @@ def update_DB(engine, min_ver=None, first_run=False, mtime=None,
 
                 # insert or skip
                 for pkgmeta in pkgmetas:
-                    add_or_skip(session, PkgMeta, pkgmeta)
+                    add_or_update(session, PkgMeta, pkgmeta)
+         # CRAN
+        url = f"{cran_mirror}/src/contrib/PACKAGES"
+        logging.info("Downloading CRAN Package List")
+        f = get_package_meta(url, mtime)
+        if f:
+            descs = f.split('\n\n')
+            pkgmetas = map(lambda x: from_str(x, None, None), descs)
+
+            # insert or skip
+            for pkgmeta in pkgmetas:
+                add_or_update(session, PkgMeta, pkgmeta)
 
 
 def add_or_skip(session, table, pkgmeta):
@@ -170,6 +168,22 @@ def add_or_skip(session, table, pkgmeta):
     if not pkgmeta:
         return
     if not session.get(table, pkgmeta.name):
+        session.add(pkgmeta)
+    session.commit()
+
+
+def add_or_update(session, table, pkgmeta):
+    if not pkgmeta:
+        return
+    if session.get(table, pkgmeta.name):
+
+        pkg = session.query(table).filter_by(
+            name=pkgmeta.name).first()
+        pkg.desc = pkgmeta.desc
+        pkg.repo = pkgmeta.repo
+        pkg.bioc_ver = pkgmeta.bioc_ver
+        pkg.bioc_category = pkgmeta.bioc_category
+    else:
         session.add(pkgmeta)
     session.commit()
 
@@ -192,6 +206,8 @@ if __name__ == '__main__':
                         '--bioc_min_ver', help="The minimum version of Bioconductor supported, must be greater than 3.0", default=None)
     parser.add_argument('-f',
                         '--first_run', help="If this is the first run, the database will be created", action='store_true')
+    parser.add_argument(
+        '--compare', help="Compare mtime of database and remote, if database is newer, skip remote (This can be buggy)", action='store_true')
 
     args = parser.parse_args()
     if not args:
