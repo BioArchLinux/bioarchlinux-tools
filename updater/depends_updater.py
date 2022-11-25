@@ -79,6 +79,7 @@ class PkgInfo:
 
         self.depends_changed = False
         self.optdepends_changed = False
+        self.desc = None
 
         if self.bioc_versions == []:
             self.bioc_versions = get_bioc_versions(self.bioc_meta_mirror)
@@ -129,6 +130,7 @@ class PkgInfo:
             desc, self.bioc_ver = descall
             self.bioc_ver = version.parse(
                 self.bioc_ver) if self.bioc_ver else None
+            self.desc = desc
             return desc
         else:
             return None

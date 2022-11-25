@@ -12,3 +12,4 @@ For usage, run with argument `-h`.
 - [x] `depends_updater` supports archiving PKGs automatically.
 - [ ] generate PKGBUILD for missing dependencies `depends_updater`
 - [x] merge `sync_meta_data` into `dbmanager`
+- [x] merge `pkg_archiver` into `dbmanager`
