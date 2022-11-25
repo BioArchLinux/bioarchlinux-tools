@@ -8,44 +8,14 @@ import logging
 from lilac2 import api as lilac
 import argparse
 import os
+import shutil
+import tempfile
+import filecmp
 import yaml
 from typing import Optional
 import sqlite3
-from dbmanager import get_bioc_versions
+from dbmanager import get_bioc_versions, EXCLUDED_PKGS
 from pkg_archiver import archive_pkg_yaml, archive_pkg_pkgbuild
-
-EXCLUDED_PKGS = {
-    "base",
-    "boot",
-    "class",
-    "cluster",
-    "codetools",
-    "compiler",
-    "datasets",
-    "foreign",
-    "graphics",
-    "grDevices",
-    "grid",
-    "KernSmooth",
-    "lattice",
-    "MASS",
-    "Matrix",
-    "methods",
-    "mgcv",
-    "nlme",
-    "nnet",
-    "parallel",
-    "rpart",
-    "spatial",
-    "splines",
-    "stats",
-    "stats4",
-    "survival",
-    "tcltk",
-    "tools",
-    "utils",
-    "R"
-}
 
 
 class PkgInfo:
@@ -316,6 +286,12 @@ class PkgInfo:
             yaml.dump(docs, f, sort_keys=False)
 
 
+def create_temporary_copy(path):
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    shutil.copy2(path, tmp.name)
+    return tmp.name
+
+
 def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
                            auto_archive=False,
                            bioc_min_ver="3.0", bioc_meta_mirror="https://bioconductor.org", output_file="added_depends.txt"):
@@ -343,6 +319,8 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
                 pkgname = "r-"+pkgname.lower()
             logging.info(f"Updating {pkgname}")
             os.chdir(f"{bioarch_path}/{pkgname}")
+            temp_pkgbuild = create_temporary_copy("PKGBUILD")
+            temp_lilac = create_temporary_copy("lilac.yaml")
             pkginfo = PkgInfo(bioc_min_version=bioc_min_ver,
                               bioc_meta_mirror=bioc_meta_mirror, bioc_versions=bioc_versions)
             pkginfo.build_body(cursor)
@@ -351,7 +329,15 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
             if auto_archive and pkginfo.is_archived():
                 archive_pkg_yaml(bioconductor_version=pkginfo.bioc_ver)
                 archive_pkg_pkgbuild(bioconductor_version=pkginfo.bioc_ver)
-            lilac.update_pkgrel()
+            # if PKGBUILD changed, bump pkgrel
+            if not filecmp.cmp(temp_pkgbuild, "PKGBUILD"):
+                lilac.update_pkgrel()
+            else:
+                # else revert changes to lilac.yaml
+                shutil.copy2(temp_lilac, "lilac.yaml")
+            os.remove(temp_pkgbuild)
+            os.remove(temp_lilac)
+
             if pkginfo.added_depends:
                 added_deps += pkginfo.added_depends
             os.chdir(current_dir)

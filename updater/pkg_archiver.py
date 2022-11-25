@@ -7,6 +7,7 @@ import os
 import yaml
 import argparse
 from lilac2.api import update_pkgrel
+import re
 
 
 def archive_pkg_by_file_list(file, bioarch_path="BioArchLinux", biconductor_version=3.15, step=1):
@@ -40,21 +41,25 @@ def archive_pkg_yaml(bioconductor_version=3.15, yaml_file="lilac.yaml"):
     with open(yaml_file, "r") as f:
         docs = yaml.load(f, Loader=yaml.FullLoader)
     url_idx = -1
+    url = None
     for i in range(len(docs['update_on'])):
         if "url" in docs['update_on'][i].keys():
             url = docs['update_on'][i]['url']
             url_idx = i
             break
 
+    if not url:
+        return
     pkg = url.rstrip('/').split('/')[-1]
+    archive_url = None
     # CRAN ARCHIVE
     if 'cran.r-project.org' in url:
         archive_url = f"https://cran.r-project.org/src/contrib/Archive/{pkg}"
     # Bioconductor ARCHIVE
     elif 'bioconductor.org' in url:
-        archive_url = f"https://bioconductor.org/packages/{bioconductor_version}/{pkg}"
-
-    docs['update_on'][url_idx]['url'] = archive_url
+        archive_url = url.replace('release', f"{bioconductor_version}")
+    if archive_url:
+        docs['update_on'][url_idx]['url'] = archive_url
     with open(yaml_file, 'w') as f:
         yaml.dump(docs, f, sort_keys=False)
 
@@ -70,7 +75,7 @@ def archive_pkg_pkgbuild(bioconductor_version=3.15, _pkgname="_pkgname"):
     flag = False
     for i in range(len(lines)):
 
-        if lines[i].startswith("url=") and '//bioconductor.org' in lines[i]:
+        if lines[i].startswith("url=") and '//bioconductor.org' in lines[i] and not re.search("packages/[\d.]+", lines[i]):
             lines[i] = lines[i].replace(
                 "packages/", f"packages/{bioconductor_version}/")
             changed = True

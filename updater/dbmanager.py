@@ -12,6 +12,39 @@ import datetime
 from dateutil.parser import parse as parsedate
 import re
 
+EXCLUDED_PKGS = {
+    "base",
+    "boot",
+    "class",
+    "cluster",
+    "codetools",
+    "compiler",
+    "datasets",
+    "foreign",
+    "graphics",
+    "grDevices",
+    "grid",
+    "KernSmooth",
+    "lattice",
+    "MASS",
+    "Matrix",
+    "methods",
+    "mgcv",
+    "nlme",
+    "nnet",
+    "parallel",
+    "rpart",
+    "spatial",
+    "splines",
+    "stats",
+    "stats4",
+    "survival",
+    "tcltk",
+    "tools",
+    "utils",
+    "R"
+}
+
 Base = declarative_base()
 
 
@@ -114,6 +147,7 @@ def remove_all_cran_pkg(engine):
     session.query(PkgMeta).filter_by(repo='CRAN').delete()
     session.commit()
 
+
 def update_DB(engine, min_ver=None, first_run=False, mtime=None,
               bioc_mirror="https://bioconductor.org", cran_mirror="https://cran.r-project.org"):
     '''
@@ -169,7 +203,7 @@ def update_DB(engine, min_ver=None, first_run=False, mtime=None,
             # insert or skip
             for pkgmeta in pkgmetas:
                 # we already deleted all CRAN packages, so we can just add them.
-                session.add(pkgmeta)
+                add_or_update(session, PkgMeta, pkgmeta)
 
 
 def add_or_skip(session, table, pkgmeta):
