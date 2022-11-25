@@ -69,6 +69,9 @@ class PkgMeta(Base):
         self.bioc_ver = bioc_ver
         self.bioc_category = bioc_category
 
+    def __repr__(self) -> str:
+        return f"Name: {self.name},\nDesc: {self.desc},\nRepo: {self.repo},\nVersion: {self.bioc_ver},\nCategory: {self.bioc_category}"
+
 
 def from_str(data, bioc_ver, bioc_cat):
     '''
@@ -218,12 +221,16 @@ def add_or_skip(session, table, pkgmeta):
 
 
 def add_or_update(session, table, pkgmeta):
+    def getmd5sum(desc):
+        return re.search(r"MD5sum: ([a-z0-9]+)\n", desc).group(1)
     if not pkgmeta:
         return
     if session.get(table, pkgmeta.name):
-
         pkg = session.query(table).filter_by(
             name=pkgmeta.name).first()
+        if pkg.repo == 'CRAN' and getmd5sum(pkg.desc) != getmd5sum(pkgmeta.desc) and not (pkg.name in EXCLUDED_PKGS):
+            logging.warning(
+                f"Overwritting package: {pkg.name}\n old meta :{pkg}\n new meta: {pkgmeta} \n")
         pkg.desc = pkgmeta.desc
         pkg.repo = pkgmeta.repo
         pkg.bioc_ver = pkgmeta.bioc_ver
