@@ -106,6 +106,14 @@ def remote_is_newer(url, mtime) -> bool:
     return url_date > file_time.astimezone()
 
 
+def remove_all_cran_pkg(engine):
+    '''
+    remove all CRAN packages from database.
+    '''
+    session = Session(engine)
+    session.query(PkgMeta).filter_by(repo='CRAN').delete()
+    session.commit()
+
 def update_DB(engine, min_ver=None, first_run=False, mtime=None,
               bioc_mirror="https://bioconductor.org", cran_mirror="https://cran.r-project.org"):
     '''
@@ -148,7 +156,9 @@ def update_DB(engine, min_ver=None, first_run=False, mtime=None,
                 # insert or skip
                 for pkgmeta in pkgmetas:
                     add_or_update(session, PkgMeta, pkgmeta)
-         # CRAN
+        # CRAN
+        logging.info("Removing old package list for CRAN")
+        remove_all_cran_pkg(engine)
         url = f"{cran_mirror}/src/contrib/PACKAGES"
         logging.info("Downloading CRAN Package List")
         f = get_package_meta(url, mtime)
@@ -158,7 +168,8 @@ def update_DB(engine, min_ver=None, first_run=False, mtime=None,
 
             # insert or skip
             for pkgmeta in pkgmetas:
-                add_or_update(session, PkgMeta, pkgmeta)
+                # we already deleted all CRAN packages, so we can just add them.
+                session.add(pkgmeta)
 
 
 def add_or_skip(session, table, pkgmeta):
