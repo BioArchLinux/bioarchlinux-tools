@@ -188,7 +188,9 @@ class PkgInfo:
         if not self.new_optdepends:
             self.optdepends_changed = bool(self.optdepends)
             return
-
+        system_opt_reqs = [
+            x for x in self.optdepends if not x.startswith('r-')]
+        system_opt_reqs.sort()
         # keep explanation of optdepends
         if any(map(lambda x: ':' in x, self.optdepends)):
             self.new_optdepends = [
@@ -205,6 +207,7 @@ class PkgInfo:
         else:
             if sorted(self.new_optdepends) != sorted(self.optdepends):
                 self.optdepends_changed = True
+        self.new_optdepends = system_opt_reqs+self.new_optdepends
 
     def update_pkgbuild(self) -> list[str]:
         '''

@@ -50,7 +50,8 @@ def archive_pkg_yaml(bioconductor_version=3.15, yaml_file="lilac.yaml"):
 
     if not url:
         return
-    pkg = url.rstrip('/').split('/')[-1]
+    pkg = url.rstrip('/')
+    pkg = re.split('/|=', pkg)[-1]
     archive_url = None
     # CRAN ARCHIVE
     if 'cran.r-project.org' in url:
