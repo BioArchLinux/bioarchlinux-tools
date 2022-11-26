@@ -90,7 +90,7 @@ def archive_pkg_pkgbuild(bioconductor_version=3.15, _pkgname="_pkgname"):
                 # https://cran.r-project.org/src/contrib/Archive/${_pkgname}/${_pkgname}_${pkgver}.tar.gz
                 new_line = lines[i].replace(
                     "src/contrib", "src/contrib/Archive/${_pkgname}")
-            elif '//bioconductor.org' in lines[i]:
+            elif '//bioconductor.org' in lines[i] and bioconductor_version != None:
                 # https://bioconductor.org/packages/release/bioc/src/contrib/${_pkgname}_${_pkgver}.tar.gz
                 # to
                 # https://bioconductor.org/packages/3.14/bioc/src/contrib/ABAEnrichment_1.24.0.tar.gz

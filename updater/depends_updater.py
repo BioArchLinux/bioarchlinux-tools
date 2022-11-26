@@ -16,6 +16,7 @@ from typing import Optional
 import sqlite3
 from dbmanager import get_bioc_versions, EXCLUDED_PKGS
 from pkg_archiver import archive_pkg_yaml, archive_pkg_pkgbuild, unarchive_cran
+import re
 
 
 class PkgInfo:
@@ -220,22 +221,12 @@ class PkgInfo:
         for i, line in enumerate(lines):
             if line.strip().startswith("depends"):
                 depends_interval[0] = i
-            elif line.strip().startswith("optdepends"):
-                optdepends_interval[0] = i
 
             if depends_interval[0] > -1 and depends_interval[1] == -1:
-                if ')' in line:
+                if line.strip().endswith(")"):
                     # end depends
                     depends_interval[1] = i
-            if optdepends_interval[0] > -1 and optdepends_interval[1] == -1:
-                if ')' in line:
-                    # end optdepends
-                    optdepends_interval[1] = i
-        if not (depends_interval[1] < optdepends_interval[0] or optdepends_interval[1] < depends_interval[0]):
-            logging.error(
-                "depends and optdepends overlap, please fix it manually")
-            return
-
+                    break
         if self.depends_changed:
             for i in range(depends_interval[0], depends_interval[1]):
                 lines[i] = ''
@@ -243,6 +234,16 @@ class PkgInfo:
                 ['depends=(', '\n'.join(['  ' + _ for _ in self.new_depends]), ')\n'])
 
         # new lines for new optdepends
+        new_optdepends_line = ""
+        for i, line in enumerate(lines):
+            if line.strip().startswith("optdepends"):
+                optdepends_interval[0] = i
+
+            if optdepends_interval[0] > -1 and optdepends_interval[1] == -1:
+                if line.strip().endswith(")"):
+                    # end optdepends
+                    optdepends_interval[1] = i
+                    break
         if self.new_optdepends:
             new_optdepends_line = '\n'.join(
                 ['optdepends=(', '\n'.join(
@@ -256,14 +257,17 @@ class PkgInfo:
                 optdepends_interval[1] = depends_interval[1]+1
 
             # has old,
-            for i in range(optdepends_interval[0], optdepends_interval[1]):
-                lines[i] = ''
-            if self.new_optdepends:
-                lines[optdepends_interval[1]] = new_optdepends_line
+            else:
+                for i in range(optdepends_interval[0], optdepends_interval[1]):
+                    lines[i] = ''
+                    lines[optdepends_interval[1]] = ""
+                if self.new_optdepends:
+                    lines[optdepends_interval[1]] = new_optdepends_line
 
         logging.info(f"Writing new PKGBUILD for {self.pkgname}")
         with open("PKGBUILD", "w") as f:
             f.writelines(lines)
+        change_arch(self.desc)
         return self.added_depends
 
     def update_yaml(self, yaml_file='lilac.yaml'):
@@ -292,6 +296,29 @@ def create_temporary_copy(path):
     return tmp.name
 
 
+def change_arch(desc: str):
+    # change  any to x86_64 in PKGBUILD or vice versa
+    need_compile = re.search("NeedsCompilation: (.*)", desc)
+    if not need_compile:
+        return
+    need_compile = need_compile.group(1)
+    with open("PKGBUILD", "r") as f:
+        lines = f.readlines()
+    started = False
+    for i, line in enumerate(lines):
+        if line.strip().startswith("arch"):
+            started = True
+        if started:
+            if need_compile.lower() == 'no':
+                lines[i] = line.replace('x86_64', 'any')
+            elif need_compile.lower() == 'yes':
+                lines[i] = line.replace('any', 'x86_64')
+        if started and line.strip().endswith(')'):
+            break
+    with open("PKGBUILD", "w") as f:
+        f.writelines(lines)
+
+
 def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
                            auto_archive=False, auto_unarchive=True,
                            bioc_min_ver="3.0", bioc_meta_mirror="https://bioconductor.org", output_file="added_depends.txt"):
@@ -315,10 +342,10 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
     added_deps = []
     with open(file, "r") as f:
         for pkgname in f:
+            logging.debug(f"Dealing with {pkgname}")
             pkgname = pkgname.strip()
             if not pkgname.strip().startswith("r-"):
                 pkgname = "r-"+pkgname.lower()
-            logging.info(f"Updating {pkgname}")
             os.chdir(f"{bioarch_path}/{pkgname}")
             temp_pkgbuild = create_temporary_copy("PKGBUILD")
             temp_lilac = create_temporary_copy("lilac.yaml")
@@ -331,13 +358,15 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
                 archive_pkg_yaml(bioconductor_version=pkginfo.bioc_ver)
                 archive_pkg_pkgbuild(bioconductor_version=pkginfo.bioc_ver)
             # if PKGBUILD changed, bump pkgrel
-            if auto_unarchive:
+            if auto_unarchive and pkginfo.desc:
                 unarchive_cran()
             if not filecmp.cmp(temp_pkgbuild, "PKGBUILD"):
                 lilac.update_pkgrel()
+                logging.info(f"Updating {pkgname}")
             else:
                 # else revert changes to lilac.yaml
                 shutil.copy2(temp_lilac, "lilac.yaml")
+                logging.debug(f"No changes to {pkgname}")
             os.remove(temp_pkgbuild)
             os.remove(temp_lilac)
 
