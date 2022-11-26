@@ -17,6 +17,7 @@ import sqlite3
 from dbmanager import get_bioc_versions, EXCLUDED_PKGS
 from pkg_archiver import archive_pkg_yaml, archive_pkg_pkgbuild, unarchive_cran
 import re
+import requests
 
 
 class PkgInfo:
@@ -106,14 +107,15 @@ class PkgInfo:
         else:
             return None
 
-    def is_archived(self) -> bool:
+    def is_archived(self, release_ver) -> bool:
         '''
         Check if the package is archived in CRAN or BIOC
+        release_ver: current release of BIOC, should be a Version e.g., "3.16"
         '''
         if not self.desc:  # not in database, archived in CRAN
             return True
         # not in the latest BIOC version, archived in BIOC
-        elif self.bioc_ver and self.bioc_ver != max(self.bioc_versions):
+        elif self.bioc_ver and self.bioc_ver < release_ver:
             return True
         return False
 
@@ -273,6 +275,21 @@ class PkgInfo:
         change_arch(self.desc)
         return self.added_depends
 
+    def get_web_bioc_version(self) -> version.Version:
+        '''
+        get bioc version from BIOC website, usually newer than the one in BIOC metadata
+        '''
+        if self.bioc_ver is None or self.bioc_ver == max(self.bioc_versions):
+            return self.bioc_ver
+        for ver in self.bioc_versions:
+            if ver > self.bioc_ver:
+                url = f"{self.bioc_meta_mirror}/packages/{ver}/{self.pkgname}"
+                r = requests.get(url)
+                if r.status_code == 200:
+                    if not 'packages-removed-with-bioconductor' in r.text:
+                        return ver
+        return self.bioc_ver
+
     def update_yaml(self, yaml_file='lilac.yaml'):
         '''
         update the `repo_depends` part of pkg, repo_depends will be sorted (systemlibs first, then r-pkgs)
@@ -294,12 +311,18 @@ class PkgInfo:
 
 
 def create_temporary_copy(path):
+    '''
+    create temporary copy of path, remember to manually delete it.
+    '''
     tmp = tempfile.NamedTemporaryFile(delete=False)
     shutil.copy2(path, tmp.name)
     return tmp.name
 
 
 def change_arch(desc: str):
+    '''
+    change `arch` to `any` if NeedsCompilation is No, and change it to x86_64 if it is Yes
+    '''
     # change  any to x86_64 in PKGBUILD or vice versa
     need_compile = re.search("NeedsCompilation: (.*)", desc)
     if not need_compile:
@@ -338,6 +361,7 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
     output_file: file to write the added depends to.
     '''
     bioc_versions = get_bioc_versions(bioc_meta_mirror)
+    MAX_BIOC_VERSION = max(bioc_versions)
     current_dir = os.getcwd()
     # where the name are _pkgname (May have upper letters) or pkgname (r-xxx)
     conn = sqlite3.connect(db)
@@ -357,9 +381,13 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
             pkginfo.build_body(cursor)
             pkginfo.update_pkgbuild()
             pkginfo.update_yaml()
-            if auto_archive and pkginfo.is_archived():
-                archive_pkg_yaml(bioconductor_version=pkginfo.bioc_ver)
-                archive_pkg_pkgbuild(bioconductor_version=pkginfo.bioc_ver)
+            if auto_archive and pkginfo.is_archived(MAX_BIOC_VERSION):
+                temp_bioc_ver = pkginfo.bioc_ver
+                if pkginfo.bioc_ver != None and pkginfo.bioc_ver < MAX_BIOC_VERSION:
+                    temp_bioc_ver = pkginfo.get_web_bioc_version()
+                if temp_bioc_ver == None or temp_bioc_ver < MAX_BIOC_VERSION:
+                    archive_pkg_yaml(bioconductor_version=temp_bioc_ver)
+                    archive_pkg_pkgbuild(bioconductor_version=temp_bioc_ver)
             # if PKGBUILD changed, bump pkgrel
             if auto_unarchive and pkginfo.desc:
                 unarchive_cran()
