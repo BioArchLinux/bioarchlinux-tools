@@ -13,4 +13,5 @@ For usage, run with argument `-h`.
 - [ ] generate PKGBUILD for missing dependencies `depends_updater`
 - [x] merge `sync_meta_data` into `dbmanager`
 - [x] merge `pkg_archiver` into `dbmanager`
-- [ ] support unarchiving CRAN pkgs automatically in `pkg_archiver`
+- [x] support unarchiving CRAN pkgs automatically in `pkg_archiver`
+- [ ] correct `arch` for pkgs.

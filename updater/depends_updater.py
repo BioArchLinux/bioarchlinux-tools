@@ -15,7 +15,7 @@ import yaml
 from typing import Optional
 import sqlite3
 from dbmanager import get_bioc_versions, EXCLUDED_PKGS
-from pkg_archiver import archive_pkg_yaml, archive_pkg_pkgbuild
+from pkg_archiver import archive_pkg_yaml, archive_pkg_pkgbuild, unarchive_cran
 
 
 class PkgInfo:
@@ -293,7 +293,7 @@ def create_temporary_copy(path):
 
 
 def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
-                           auto_archive=False,
+                           auto_archive=False, auto_unarchive=True,
                            bioc_min_ver="3.0", bioc_meta_mirror="https://bioconductor.org", output_file="added_depends.txt"):
     '''
     Update depends of packages listed in `file`, one package name per line, CRAN style(e.g. `Rcpp`) and pkgname style (`r-rcpp`) are both supported.
@@ -302,6 +302,7 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
     bioarch_path: path to BioArchLinux
     db: path to the database to be read
     auto_archive: whether to archive the package if it is not in CRAN or the latest BIOC
+    auto_unarchive: whether to unarchive the archived package if it is in CRAN.
     bioc_min_ver: minimum version of Bioconductor to be supported.
     bioc_meta_mirror: The server used to get all version numbers of BIOC
     output_file: file to write the added depends to.
@@ -330,6 +331,8 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
                 archive_pkg_yaml(bioconductor_version=pkginfo.bioc_ver)
                 archive_pkg_pkgbuild(bioconductor_version=pkginfo.bioc_ver)
             # if PKGBUILD changed, bump pkgrel
+            if auto_unarchive:
+                unarchive_cran()
             if not filecmp.cmp(temp_pkgbuild, "PKGBUILD"):
                 lilac.update_pkgrel()
             else:
@@ -366,11 +369,15 @@ if __name__ == '__main__':
         '-o', '--output', help='The file to save newly added depends name', default="added_depends.txt")
     parser.add_argument(
         '-a', '--auto-archive', help='Automatically archive pkgs that are not in CRAN or the latest BIOC release', action='store_true')
+    parser.add_argument(
+        '--no-auto-unarchive', help='DO NOT Automatically unarchive pkgs that are now in CRAN', action='store_false')
 
     args = parser.parse_args()
 
     if args.file:
         update_depends_by_file(args.file, args.bioarch_path, args.db,
-                               bioc_min_ver=args.bioc_min_ver, bioc_meta_mirror=args.bioc_meta_mirror, output_file=args.output, auto_archive=args.auto_archive)
+                               output_file=args.output,
+                               bioc_min_ver=args.bioc_min_ver, bioc_meta_mirror=args.bioc_meta_mirror,
+                               auto_archive=args.auto_archive, auto_unarchive=args.no_auto_unarchive)
     else:
         parser.print_help()

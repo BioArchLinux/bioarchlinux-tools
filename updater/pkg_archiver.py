@@ -89,7 +89,7 @@ def archive_pkg_pkgbuild(bioconductor_version=3.15, _pkgname="_pkgname"):
                 # to
                 # https://cran.r-project.org/src/contrib/Archive/${_pkgname}/${_pkgname}_${pkgver}.tar.gz
                 new_line = lines[i].replace(
-                    "src/contrib", r"src/contrib/Archive/${" + _pkgname + '}')
+                    "src/contrib", "src/contrib/Archive/${_pkgname}")
             elif '//bioconductor.org' in lines[i]:
                 # https://bioconductor.org/packages/release/bioc/src/contrib/${_pkgname}_${_pkgver}.tar.gz
                 # to
@@ -104,6 +104,47 @@ def archive_pkg_pkgbuild(bioconductor_version=3.15, _pkgname="_pkgname"):
     with open("PKGBUILD", "w") as f:
         f.writelines(lines)
     return changed
+
+
+def unarchive_cran():
+    unarchive_cran_pkgbuild()
+    unarchive_cran_yaml()
+
+
+def unarchive_cran_pkgbuild():
+    with open("PKGBUILD", "r") as f:
+        lines = f.readlines()
+    for i in range(len(lines)):
+        if lines[i].startswith("source="):
+            if "src/contrib/Archive" in lines[i]:
+                lines[i] = lines[i].replace(
+                    "src/contrib/Archive/${_pkgname}", "src/contrib")
+    with open("PKGBUILD", "w") as f:
+        f.writelines(lines)
+
+
+def unarchive_cran_yaml():
+    with open("lilac.yaml", "r") as f:
+        docs = yaml.load(f, Loader=yaml.FullLoader)
+    url_idx = -1
+    url = None
+    for i in range(len(docs['update_on'])):
+        if "url" in docs['update_on'][i].keys():
+            url = docs['update_on'][i]['url']
+            url_idx = i
+            break
+    if not url:
+        return
+    pkg = url.rstrip('/')
+    pkg = re.split('/|=', pkg)[-1]
+    archive_url = None
+    # CRAN ARCHIVE
+    if 'cran.r-project.org' in url:
+        archive_url = f"https://cran.r-project.org/package={pkg}"
+    if archive_url:
+        docs['update_on'][url_idx]['url'] = archive_url
+    with open("lilac.yaml", 'w') as f:
+        yaml.dump(docs, f, sort_keys=False)
 
 
 if __name__ == '__main__':
