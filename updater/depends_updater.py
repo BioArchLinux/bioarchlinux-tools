@@ -195,11 +195,7 @@ class PkgInfo:
         system_opt_reqs.sort()
         # keep explanation of optdepends
         if any(map(lambda x: ':' in x, self.optdepends)):
-            self.new_optdepends = [
-                x+': ' for x in self.new_optdepends if ':' not in x]
-            opt_dict = {pkg.strip(): desc.strip() for (pkg, desc) in
-                        (item.split(':', 1) for item in self.optdepends)}
-
+            opt_dict = lilac.obtain_optdepends(parse_dict=True)
             if sorted(self.new_optdepends) != sorted(opt_dict.keys()):
                 self.optdepends_changed = True
             for i in range(len(self.new_optdepends)):
