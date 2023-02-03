@@ -19,6 +19,18 @@ from pkg_archiver import archive_pkg_yaml, archive_pkg_pkgbuild, unarchive_cran
 import re
 import requests
 
+# use | in lilac.yaml
+def str_presenter(dumper, data):
+    """configures yaml for dumping multiline strings
+    Ref: https://stackoverflow.com/questions/8640959/how-can-i-control-what-scalar-form-pyyaml-uses-for-my-data"""
+    if data.count('\n') > 0:  # check for multiline string
+        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+
+
+yaml.add_representer(str, str_presenter)
+yaml.representer.SafeRepresenter.add_representer(
+    str, str_presenter)  # to use with safe_dum
 
 class PkgInfo:
     def __init__(self, pkgname=None, depends=None, optdepends=None,
