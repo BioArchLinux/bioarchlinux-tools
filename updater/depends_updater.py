@@ -260,7 +260,7 @@ class PkgInfo:
         if self.new_optdepends:
             new_optdepends_line = '\n'.join(
                 ['optdepends=(', '\n'.join(
-                    ['  ' + _ for _ in self.new_optdepends]), ')\n'])
+                    ['  ' + f"'{x}'" if ":" in x else '  '+x for x in self.new_optdepends]), ')\n'])
         if self.optdepends_changed:
             # no old, but has new
             if optdepends_interval[0] == -1:
