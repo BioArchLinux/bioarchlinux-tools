@@ -392,7 +392,12 @@ def update_depends_by_file(file, bioarch_path="BioArchLinux", db="sqlite.db",
             if auto_archive and pkginfo.is_archived(MAX_BIOC_VERSION):
                 temp_bioc_ver = pkginfo.bioc_ver
                 if pkginfo.bioc_ver != None and pkginfo.bioc_ver < MAX_BIOC_VERSION:
-                    temp_bioc_ver = pkginfo.get_web_bioc_version()
+                    try:
+                        temp_bioc_ver = pkginfo.get_web_bioc_version()
+                    except Exception as e:
+                        logging.error(
+                            f"Failed to getting web bioc version for {pkgname} due to {e}")
+                        temp_bioc_ver = None
                 if temp_bioc_ver == None or temp_bioc_ver < MAX_BIOC_VERSION:
                     archive_pkg_yaml(bioconductor_version=temp_bioc_ver)
                     archive_pkg_pkgbuild(bioconductor_version=temp_bioc_ver)
