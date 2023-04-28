@@ -58,7 +58,11 @@ def archive_pkg_yaml(bioconductor_version=3.15, yaml_file="lilac.yaml"):
         archive_url = f"https://cran.r-project.org/src/contrib/Archive/{pkg}"
     # Bioconductor ARCHIVE
     elif 'bioconductor.org' in url:
-        archive_url = url.replace('release', f"{bioconductor_version}")
+        # https://bioconductor.org/packages/AffyCompatible
+        # to
+        # https://bioconductor.org/packages/3.16/AffyCompatible
+        archive_url = url.replace(
+            'packages', f"packages/{bioconductor_version}")
     if archive_url:
         docs['update_on'][url_idx]['url'] = archive_url
     with open(yaml_file, 'w') as f:

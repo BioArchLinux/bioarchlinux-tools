@@ -20,6 +20,8 @@ import re
 import requests
 
 # use | in lilac.yaml
+
+
 def str_presenter(dumper, data):
     """configures yaml for dumping multiline strings
     Ref: https://stackoverflow.com/questions/8640959/how-can-i-control-what-scalar-form-pyyaml-uses-for-my-data"""
@@ -31,6 +33,7 @@ def str_presenter(dumper, data):
 yaml.add_representer(str, str_presenter)
 yaml.representer.SafeRepresenter.add_representer(
     str, str_presenter)  # to use with safe_dum
+
 
 class PkgInfo:
     def __init__(self, pkgname=None, depends=None, optdepends=None,
@@ -315,7 +318,9 @@ class PkgInfo:
         if new_deps:
             docs['repo_depends'] = new_deps
         with open(yaml_file, 'w') as f:
-            yaml.dump(docs, f, sort_keys=False)
+            stream = yaml.dump(docs,  sort_keys=False,
+                               default_flow_style=False, indent=2)
+            f.write(stream)
 
 
 def create_temporary_copy(path):
